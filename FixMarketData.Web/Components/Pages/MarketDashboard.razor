@@ -1,0 +1,135 @@
+@implements IAsyncDisposable
+@inject IConfiguration Configuration
+
+<h1>Market Data Dashboard</h1>
+
+<table class="table table-striped table-sm align-middle">
+    <thead>
+        <tr>
+            <th>Symbol</th>
+            <th>Bid</th>
+            <th>Ask</th>
+            <th>Bid Size</th>
+            <th>Ask Size</th>
+            <th>Timestamp (UTC)</th>
+        </tr>
+    </thead>
+    <tbody>
+        @if (_ticks.Count == 0)
+        {
+            <tr>
+                <td colspan="6"><em>Waiting for market data...</em></td>
+            </tr>
+        }
+        else
+        {
+            @foreach (var row in _ticks.Values.OrderBy(t => t.Symbol))
+            {
+                <tr>
+                    <td>@row.Symbol</td>
+                    <td class="@GetTrendClass(row.BidTrend)">@row.BidPrice.ToString("0.00000")</td>
+                    <td class="@GetTrendClass(row.AskTrend)">@row.AskPrice.ToString("0.00000")</td>
+                    <td>@row.BidSize.ToString("0.00000")</td>
+                    <td>@row.AskSize.ToString("0.00000")</td>
+                    <td>@row.Timestamp.ToString("HH:mm:ss.fff")</td>
+                </tr>
+            }
+        }
+    </tbody>
+</table>
+
+<style>
+    .price-up {
+        background-color: #d4edda;
+        transition: background-color 0.4s ease;
+    }
+
+    .price-down {
+        background-color: #f8d7da;
+        transition: background-color 0.4s ease;
+    }
+</style>
+
+@code {
+    private readonly Dictionary<string, TickViewModel> _ticks = [];
+    private HubConnection? _hubConnection;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var backendBaseUrl = Configuration["BackendBaseUrl"] ?? "https://localhost:7544";
+
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(new Uri(new Uri(backendBaseUrl), "/marketDataHub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<MarketDataTick>("ReceiveMarketData", tick =>
+        {
+            ApplyTick(tick);
+            _ = InvokeAsync(StateHasChanged);
+        });
+
+        await _hubConnection.StartAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+
+    private void ApplyTick(MarketDataTick tick)
+    {
+        if (_ticks.TryGetValue(tick.Symbol, out var existing))
+        {
+            existing.BidTrend = tick.BidPrice > existing.BidPrice ? PriceTrend.Up : tick.BidPrice < existing.BidPrice ? PriceTrend.Down : PriceTrend.None;
+            existing.AskTrend = tick.AskPrice > existing.AskPrice ? PriceTrend.Up : tick.AskPrice < existing.AskPrice ? PriceTrend.Down : PriceTrend.None;
+            existing.BidPrice = tick.BidPrice;
+            existing.AskPrice = tick.AskPrice;
+            existing.BidSize = tick.BidSize;
+            existing.AskSize = tick.AskSize;
+            existing.Timestamp = tick.Timestamp;
+            return;
+        }
+
+        _ticks[tick.Symbol] = new TickViewModel
+        {
+            Symbol = tick.Symbol,
+            BidPrice = tick.BidPrice,
+            AskPrice = tick.AskPrice,
+            BidSize = tick.BidSize,
+            AskSize = tick.AskSize,
+            Timestamp = tick.Timestamp,
+            BidTrend = PriceTrend.None,
+            AskTrend = PriceTrend.None
+        };
+    }
+
+    private static string GetTrendClass(PriceTrend trend) => trend switch
+    {
+        PriceTrend.Up => "price-up",
+        PriceTrend.Down => "price-down",
+        _ => string.Empty
+    };
+
+    private enum PriceTrend
+    {
+        None,
+        Up,
+        Down
+    }
+
+    private sealed class TickViewModel
+    {
+        public string Symbol { get; set; } = string.Empty;
+        public decimal BidPrice { get; set; }
+        public decimal AskPrice { get; set; }
+        public decimal BidSize { get; set; }
+        public decimal AskSize { get; set; }
+        public DateTime Timestamp { get; set; }
+        public PriceTrend BidTrend { get; set; }
+        public PriceTrend AskTrend { get; set; }
+    }
+}

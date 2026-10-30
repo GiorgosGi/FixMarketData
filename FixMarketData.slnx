@@ -1,6 +1,6 @@
 <Solution>
   <Project Path="FixMarketData.ApiService/FixMarketData.ApiService.csproj" />
-  <Project Path="FixMarketData.AppHost/FixMarketData.AppHost.csproj" />
-  <Project Path="FixMarketData.ServiceDefaults/FixMarketData.ServiceDefaults.csproj" />
+  <Project Path="FixMarketData.Shared/FixMarketData.Shared.csproj" />
+  <Project Path="FixMarketData.Simulator/FixMarketData.Simulator.csproj" />
   <Project Path="FixMarketData.Web/FixMarketData.Web.csproj" />
 </Solution>

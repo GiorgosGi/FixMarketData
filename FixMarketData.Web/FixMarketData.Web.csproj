@@ -4,10 +4,16 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RootNamespace>FixMarketData.Ui</RootNamespace>
+    <AssemblyName>FixMarketData.Ui</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\FixMarketData.ServiceDefaults\FixMarketData.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\FixMarketData.Shared\FixMarketData.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.0" />
   </ItemGroup>
 
 </Project>
