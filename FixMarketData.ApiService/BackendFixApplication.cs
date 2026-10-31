@@ -76,27 +76,48 @@ public sealed class BackendFixApplication(
 
     private MarketDataTick? MapSnapshot(Message snapshot)
     {
-        if (!snapshot.IsSetField(Tags.Symbol) || !snapshot.IsSetField(Tags.NoMDEntries))
+        if (!snapshot.IsSetField(Tags.Symbol))
         {
             return null;
         }
 
         var symbol = snapshot.GetString(Tags.Symbol);
-        var totalEntries = snapshot.GetInt(Tags.NoMDEntries);
+
+        var declaredEntries = snapshot.IsSetField(Tags.NoMDEntries)
+            ? snapshot.GetInt(Tags.NoMDEntries)
+            : 0;
+
+        var actualGroups = snapshot.GroupCount(Tags.NoMDEntries);
+        var entriesToRead = Math.Min(declaredEntries, actualGroups);
 
         decimal? bidPrice = null;
         decimal? askPrice = null;
         decimal? bidSize = null;
         decimal? askSize = null;
 
-        for (var i = 1; i <= totalEntries; i++)
+        if (entriesToRead > 0)
         {
-            if (!TryReadEntryFromGroup(snapshot, i, out var entryType, out var entryPx, out var entrySize) &&
-                !(i == 1 && TryReadEntryFromFields(snapshot, out entryType, out entryPx, out entrySize)))
+            for (var i = 1; i <= entriesToRead; i++)
             {
-                continue;
-            }
+                if (!TryReadEntryFromGroup(snapshot, i, out var entryType, out var entryPx, out var entrySize))
+                {
+                    continue;
+                }
 
+                if (entryType == MDEntryType.BID)
+                {
+                    bidPrice = entryPx;
+                    bidSize = entrySize;
+                }
+                else if (entryType == MDEntryType.OFFER)
+                {
+                    askPrice = entryPx;
+                    askSize = entrySize;
+                }
+            }
+        }
+        else if (TryReadEntryFromFields(snapshot, out var entryType, out var entryPx, out var entrySize))
+        {
             if (entryType == MDEntryType.BID)
             {
                 bidPrice = entryPx;
@@ -148,33 +169,28 @@ public sealed class BackendFixApplication(
 
     private static bool TryReadEntryFromGroup(Message snapshot, int groupIndex, out char entryType, out decimal entryPx, out decimal entrySize)
     {
-        try
-        {
-            var group = new Group(Tags.NoMDEntries, Tags.MDEntryType);
-            snapshot.GetGroup(groupIndex, group);
+        entryType = default;
+        entryPx = default;
+        entrySize = default;
 
-            if (!group.IsSetField(Tags.MDEntryType) || !group.IsSetField(Tags.MDEntryPx) || !group.IsSetField(Tags.MDEntrySize))
-            {
-                entryType = default;
-                entryPx = default;
-                entrySize = default;
-                return false;
-            }
-
-            entryType = group.GetChar(Tags.MDEntryType);
-            entryPx = group.GetDecimal(Tags.MDEntryPx);
-            entrySize = group.GetDecimal(Tags.MDEntrySize);
-            return true;
-        }
-        catch
+        if (groupIndex < 1 || groupIndex > snapshot.GroupCount(Tags.NoMDEntries))
         {
-            entryType = default;
-            entryPx = default;
-            entrySize = default;
             return false;
         }
-    }
 
+        var group = new Group(Tags.NoMDEntries, Tags.MDEntryType);
+        snapshot.GetGroup(groupIndex, group);
+
+        if (!group.IsSetField(Tags.MDEntryType) || !group.IsSetField(Tags.MDEntryPx) || !group.IsSetField(Tags.MDEntrySize))
+        {
+            return false;
+        }
+
+        entryType = group.GetChar(Tags.MDEntryType);
+        entryPx = group.GetDecimal(Tags.MDEntryPx);
+        entrySize = group.GetDecimal(Tags.MDEntrySize);
+        return true;
+    }
     private static bool TryReadEntryFromFields(Message snapshot, out char entryType, out decimal entryPx, out decimal entrySize)
     {
         if (!snapshot.IsSetField(Tags.MDEntryType) || !snapshot.IsSetField(Tags.MDEntryPx) || !snapshot.IsSetField(Tags.MDEntrySize))
