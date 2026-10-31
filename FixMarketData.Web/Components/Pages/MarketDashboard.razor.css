@@ -1,6 +1,9 @@
 .dashboard-shell {
     max-width: 1100px;
     margin: 0 auto;
+    padding: 1rem;
+    border-radius: 0.75rem;
+    background-color: #f8fafc;
 }
 
 .dashboard-header {
@@ -9,6 +12,9 @@
     align-items: flex-end;
     gap: 1rem;
     margin-bottom: 1rem;
+    padding: 0.75rem 0.9rem;
+    border-radius: 0.6rem;
+    background-color: #eef3f9;
 }
 
 .dashboard-subtitle {
@@ -21,6 +27,10 @@
     flex-direction: column;
     align-items: flex-end;
     gap: 0.35rem;
+}
+
+.table-responsive {
+    background-color: #ffffff;
 }
 
 .price-up {
