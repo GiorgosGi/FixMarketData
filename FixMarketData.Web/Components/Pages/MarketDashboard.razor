@@ -64,53 +64,67 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var backendBaseUrl = Configuration["BackendBaseUrl"] ?? "https://localhost:7544";
-        var candidateHubUrls = BuildCandidateHubUrls(backendBaseUrl);
-
-        Exception? lastException = null;
-        const int maxAttempts = 30;
-
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        try
         {
-            foreach (var hubUrl in candidateHubUrls)
+            var backendBaseUrl = Configuration["BackendBaseUrl"] ?? "https://localhost:7544";
+            var candidateHubUrls = BuildCandidateHubUrls(backendBaseUrl);
+
+            Exception? lastException = null;
+            const int maxAttempts = 30;
+
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                _hubConnection = new HubConnectionBuilder()
-                    .WithUrl(hubUrl)
-                    .WithAutomaticReconnect()
-                    .Build();
-
-                _hubConnection.On<MarketDataTick>("ReceiveMarketData", tick =>
+                foreach (var hubUrl in candidateHubUrls)
                 {
-                    _ = InvokeAsync(() =>
+                    _hubConnection = new HubConnectionBuilder()
+                        .WithUrl(hubUrl)
+                        .WithAutomaticReconnect()
+                        .Build();
+
+                    _hubConnection.On<MarketDataTick>("ReceiveMarketData", tick =>
                     {
-                        ApplyTick(tick);
-                        StateHasChanged();
+                        _ = InvokeAsync(() =>
+                        {
+                            try
+                            {
+                                ApplyTick(tick);
+                                StateHasChanged();
+                            }
+                            catch (Exception ex)
+                            {
+                                _connectionError = $"Market data update failed: {ex.Message}";
+                            }
+                        });
                     });
-                });
 
-                try
-                {
-                    await _hubConnection.StartAsync();
-                    _connectionError = null;
-                    return;
+                    try
+                    {
+                        await _hubConnection.StartAsync();
+                        _connectionError = null;
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastException = ex;
+                        await _hubConnection.DisposeAsync();
+                        _hubConnection = null;
+                    }
                 }
-                catch (Exception ex)
-                {
-                    lastException = ex;
-                    await _hubConnection.DisposeAsync();
-                    _hubConnection = null;
-                }
+
+                _connectionError = $"Unable to connect to backend SignalR hub yet. Retrying... ({attempt}/{maxAttempts})";
+                await Task.Delay(1000);
             }
 
-            _connectionError = $"Unable to connect to backend SignalR hub yet. Retrying... ({attempt}/{maxAttempts})";
-            await Task.Delay(1000);
+            _connectionError = $"Unable to connect to backend SignalR hub. Tried: {string.Join(", ", candidateHubUrls.Select(u => u.ToString()))}";
+            if (lastException is not null)
+            {
+                Console.WriteLine(lastException);
+            }
         }
-
-        _connectionError = $"Unable to connect to backend SignalR hub. Tried: {string.Join(", ", candidateHubUrls.Select(u => u.ToString()))}";
-
-        if (lastException is not null)
+        catch (Exception ex)
         {
-            Console.WriteLine(lastException.Message);
+            _connectionError = $"Dashboard initialization failed: {ex.Message}";
+            Console.WriteLine(ex);
         }
     }
 
@@ -143,7 +157,18 @@
 
     private void ApplyTick(MarketDataTick tick)
     {
-        if (_ticks.TryGetValue(tick.Symbol, out var existing))
+        if (tick is null)
+        {
+            return;
+        }
+
+        var symbol = tick.Symbol?.Trim();
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            return;
+        }
+
+        if (_ticks.TryGetValue(symbol, out var existing))
         {
             existing.BidTrend = tick.BidPrice > existing.BidPrice ? PriceTrend.Up : tick.BidPrice < existing.BidPrice ? PriceTrend.Down : PriceTrend.None;
             existing.AskTrend = tick.AskPrice > existing.AskPrice ? PriceTrend.Up : tick.AskPrice < existing.AskPrice ? PriceTrend.Down : PriceTrend.None;
@@ -155,9 +180,9 @@
             return;
         }
 
-        _ticks[tick.Symbol] = new TickViewModel
+        _ticks[symbol] = new TickViewModel
         {
-            Symbol = tick.Symbol,
+            Symbol = symbol,
             BidPrice = tick.BidPrice,
             AskPrice = tick.AskPrice,
             BidSize = tick.BidSize,
