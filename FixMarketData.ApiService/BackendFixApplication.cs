@@ -11,6 +11,8 @@ public sealed class BackendFixApplication(
     IHubContext<MarketDataHub> hubContext,
     ILogger<BackendFixApplication> logger) : IApplication
 {
+    private readonly object _bookLock = new();
+    private readonly Dictionary<string, PartialBookState> _bookBySymbol = [];
     public void OnCreate(SessionID sessionID)
     {
         logger.LogInformation("FIX session created: {SessionId}", sessionID);
@@ -72,7 +74,7 @@ public sealed class BackendFixApplication(
         }
     }
 
-    private static MarketDataTick? MapSnapshot(Message snapshot)
+    private MarketDataTick? MapSnapshot(Message snapshot)
     {
         if (!snapshot.IsSetField(Tags.Symbol) || !snapshot.IsSetField(Tags.NoMDEntries))
         {
@@ -89,12 +91,11 @@ public sealed class BackendFixApplication(
 
         for (var i = 1; i <= totalEntries; i++)
         {
-            var group = new Group(Tags.NoMDEntries, Tags.MDEntryType);
-            snapshot.GetGroup(i, group);
-
-            var entryType = group.GetChar(Tags.MDEntryType);
-            var entryPx = group.GetDecimal(Tags.MDEntryPx);
-            var entrySize = group.GetDecimal(Tags.MDEntrySize);
+            if (!TryReadEntryFromGroup(snapshot, i, out var entryType, out var entryPx, out var entrySize) &&
+                !(i == 1 && TryReadEntryFromFields(snapshot, out entryType, out entryPx, out entrySize)))
+            {
+                continue;
+            }
 
             if (entryType == MDEntryType.BID)
             {
@@ -108,19 +109,93 @@ public sealed class BackendFixApplication(
             }
         }
 
-        if (bidPrice is null || askPrice is null || bidSize is null || askSize is null)
+        lock (_bookLock)
         {
-            return null;
+            if (!_bookBySymbol.TryGetValue(symbol, out var state))
+            {
+                state = new PartialBookState();
+                _bookBySymbol[symbol] = state;
+            }
+
+            if (bidPrice is not null && bidSize is not null)
+            {
+                state.BidPrice = bidPrice.Value;
+                state.BidSize = bidSize.Value;
+            }
+
+            if (askPrice is not null && askSize is not null)
+            {
+                state.AskPrice = askPrice.Value;
+                state.AskSize = askSize.Value;
+            }
+
+            if (state.BidPrice is null || state.BidSize is null || state.AskPrice is null || state.AskSize is null)
+            {
+                return null;
+            }
+
+            return new MarketDataTick
+            {
+                Symbol = symbol,
+                BidPrice = state.BidPrice.Value,
+                AskPrice = state.AskPrice.Value,
+                BidSize = state.BidSize.Value,
+                AskSize = state.AskSize.Value,
+                Timestamp = DateTime.UtcNow
+            };
+        }
+    }
+
+    private static bool TryReadEntryFromGroup(Message snapshot, int groupIndex, out char entryType, out decimal entryPx, out decimal entrySize)
+    {
+        try
+        {
+            var group = new Group(Tags.NoMDEntries, Tags.MDEntryType);
+            snapshot.GetGroup(groupIndex, group);
+
+            if (!group.IsSetField(Tags.MDEntryType) || !group.IsSetField(Tags.MDEntryPx) || !group.IsSetField(Tags.MDEntrySize))
+            {
+                entryType = default;
+                entryPx = default;
+                entrySize = default;
+                return false;
+            }
+
+            entryType = group.GetChar(Tags.MDEntryType);
+            entryPx = group.GetDecimal(Tags.MDEntryPx);
+            entrySize = group.GetDecimal(Tags.MDEntrySize);
+            return true;
+        }
+        catch
+        {
+            entryType = default;
+            entryPx = default;
+            entrySize = default;
+            return false;
+        }
+    }
+
+    private static bool TryReadEntryFromFields(Message snapshot, out char entryType, out decimal entryPx, out decimal entrySize)
+    {
+        if (!snapshot.IsSetField(Tags.MDEntryType) || !snapshot.IsSetField(Tags.MDEntryPx) || !snapshot.IsSetField(Tags.MDEntrySize))
+        {
+            entryType = default;
+            entryPx = default;
+            entrySize = default;
+            return false;
         }
 
-        return new MarketDataTick
-        {
-            Symbol = symbol,
-            BidPrice = bidPrice.Value,
-            AskPrice = askPrice.Value,
-            BidSize = bidSize.Value,
-            AskSize = askSize.Value,
-            Timestamp = DateTime.UtcNow
-        };
+        entryType = snapshot.GetChar(Tags.MDEntryType);
+        entryPx = snapshot.GetDecimal(Tags.MDEntryPx);
+        entrySize = snapshot.GetDecimal(Tags.MDEntrySize);
+        return true;
+    }
+
+    private sealed class PartialBookState
+    {
+        public decimal? BidPrice { get; set; }
+        public decimal? AskPrice { get; set; }
+        public decimal? BidSize { get; set; }
+        public decimal? AskSize { get; set; }
     }
 }

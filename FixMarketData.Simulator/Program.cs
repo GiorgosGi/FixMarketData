@@ -1,5 +1,8 @@
 using FixMarketData.Simulator;
 using QuickFix;
+using QuickFix.Logger;
+using QuickFix.Store;
+using QuickFix.Transport;
 
 var settings = new SessionSettings("acceptor.cfg");
 var application = new SimulatorApplication();

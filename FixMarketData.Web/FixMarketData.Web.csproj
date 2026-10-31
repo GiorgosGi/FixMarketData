@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>FixMarketData.Ui</RootNamespace>
     <AssemblyName>FixMarketData.Ui</AssemblyName>
+    <UseAppHost>false</UseAppHost>
   </PropertyGroup>
 
   <ItemGroup>

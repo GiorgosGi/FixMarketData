@@ -76,16 +76,17 @@ public sealed class SimulatorApplication : IApplication, IDisposable
 
         foreach (var symbol in _basePrices.Keys)
         {
-            var tick = NextTick(symbol);
+            var (bidSnapshot, askSnapshot) = NextTicks(symbol);
 
             foreach (var sessionId in activeSessions)
             {
-                Session.SendToTarget(tick, sessionId);
+                Session.SendToTarget(bidSnapshot, sessionId);
+                Session.SendToTarget(askSnapshot, sessionId);
             }
         }
     }
 
-    private Message NextTick(string symbol)
+    private (Message BidSnapshot, Message AskSnapshot) NextTicks(string symbol)
     {
         decimal mid;
         lock (_priceLock)
@@ -102,22 +103,24 @@ public sealed class SimulatorApplication : IApplication, IDisposable
         var bidSize = Math.Round(100 + (decimal)_random.NextDouble() * 900, 5, MidpointRounding.AwayFromZero);
         var askSize = Math.Round(100 + (decimal)_random.NextDouble() * 900, 5, MidpointRounding.AwayFromZero);
 
+        var bidSnapshot = CreateSnapshot(symbol, MDEntryType.BID, bid, bidSize);
+        var askSnapshot = CreateSnapshot(symbol, MDEntryType.OFFER, ask, askSize);
+
+        return (bidSnapshot, askSnapshot);
+    }
+
+    private static Message CreateSnapshot(string symbol, char entryType, decimal entryPrice, decimal entrySize)
+    {
         var snapshot = new Message();
         snapshot.Header.SetField(new MsgType(MsgType.MARKET_DATA_SNAPSHOT_FULL_REFRESH));
         snapshot.SetField(new Symbol(symbol));
-        snapshot.SetField(new NoMDEntries(2));
+        snapshot.SetField(new NoMDEntries(1));
 
-        var bidEntry = new Group(Tags.NoMDEntries, Tags.MDEntryType);
-        bidEntry.SetField(new MDEntryType(MDEntryType.BID));
-        bidEntry.SetField(new MDEntryPx(bid));
-        bidEntry.SetField(new MDEntrySize(bidSize));
-        snapshot.AddGroup(bidEntry);
-
-        var askEntry = new Group(Tags.NoMDEntries, Tags.MDEntryType);
-        askEntry.SetField(new MDEntryType(MDEntryType.OFFER));
-        askEntry.SetField(new MDEntryPx(ask));
-        askEntry.SetField(new MDEntrySize(askSize));
-        snapshot.AddGroup(askEntry);
+        var entry = new Group(Tags.NoMDEntries, Tags.MDEntryType);
+        entry.SetField(new MDEntryType(entryType));
+        entry.SetField(new MDEntryPx(entryPrice));
+        entry.SetField(new MDEntrySize(entrySize));
+        snapshot.AddGroup(entry);
 
         return snapshot;
     }

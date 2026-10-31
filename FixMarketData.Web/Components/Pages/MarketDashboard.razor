@@ -3,6 +3,13 @@
 
 <h1>Market Data Dashboard</h1>
 
+@if (_connectionError is not null)
+{
+    <div class="alert alert-warning" role="alert">
+        @_connectionError
+    </div>
+}
+
 <table class="table table-striped table-sm align-middle">
     <thead>
         <tr>
@@ -53,23 +60,77 @@
 @code {
     private readonly Dictionary<string, TickViewModel> _ticks = [];
     private HubConnection? _hubConnection;
+    private string? _connectionError;
 
     protected override async Task OnInitializedAsync()
     {
         var backendBaseUrl = Configuration["BackendBaseUrl"] ?? "https://localhost:7544";
+        var candidateHubUrls = BuildCandidateHubUrls(backendBaseUrl);
 
-        _hubConnection = new HubConnectionBuilder()
-            .WithUrl(new Uri(new Uri(backendBaseUrl), "/marketDataHub"))
-            .WithAutomaticReconnect()
-            .Build();
+        Exception? lastException = null;
+        const int maxAttempts = 30;
 
-        _hubConnection.On<MarketDataTick>("ReceiveMarketData", tick =>
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            ApplyTick(tick);
-            _ = InvokeAsync(StateHasChanged);
-        });
+            foreach (var hubUrl in candidateHubUrls)
+            {
+                _hubConnection = new HubConnectionBuilder()
+                    .WithUrl(hubUrl)
+                    .WithAutomaticReconnect()
+                    .Build();
 
-        await _hubConnection.StartAsync();
+                _hubConnection.On<MarketDataTick>("ReceiveMarketData", tick =>
+                {
+                    _ = InvokeAsync(() =>
+                    {
+                        ApplyTick(tick);
+                        StateHasChanged();
+                    });
+                });
+
+                try
+                {
+                    await _hubConnection.StartAsync();
+                    _connectionError = null;
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    await _hubConnection.DisposeAsync();
+                    _hubConnection = null;
+                }
+            }
+
+            _connectionError = $"Unable to connect to backend SignalR hub yet. Retrying... ({attempt}/{maxAttempts})";
+            await Task.Delay(1000);
+        }
+
+        _connectionError = $"Unable to connect to backend SignalR hub. Tried: {string.Join(", ", candidateHubUrls.Select(u => u.ToString()))}";
+
+        if (lastException is not null)
+        {
+            Console.WriteLine(lastException.Message);
+        }
+    }
+
+    private static IReadOnlyList<Uri> BuildCandidateHubUrls(string backendBaseUrl)
+    {
+        var configuredBaseUri = new Uri(backendBaseUrl, UriKind.Absolute);
+        var configuredHubUri = new Uri(configuredBaseUri, "/marketDataHub");
+
+        var candidates = new List<Uri> { configuredHubUri };
+
+        if (configuredBaseUri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) &&
+            configuredBaseUri.Port == 7544)
+        {
+            candidates.Add(new Uri("http://localhost:5491/marketDataHub"));
+        }
+
+        return candidates
+            .GroupBy(u => u.AbsoluteUri, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
     }
 
     public async ValueTask DisposeAsync()

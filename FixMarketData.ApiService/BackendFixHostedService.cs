@@ -1,4 +1,7 @@
 using QuickFix;
+using QuickFix.Logger;
+using QuickFix.Store;
+using QuickFix.Transport;
 
 namespace FixMarketData.Backend;
 
@@ -14,7 +17,7 @@ public sealed class BackendFixHostedService(
         var storeFactory = new FileStoreFactory(settings);
         var logFactory = new FileLogFactory(settings);
 
-        _initiator = new QuickFix.Transport.SocketInitiator(backendFixApplication, storeFactory, settings, logFactory);
+        _initiator = new SocketInitiator(backendFixApplication, storeFactory, settings, logFactory);
         _initiator.Start();
 
         logger.LogInformation("FIX initiator started.");
