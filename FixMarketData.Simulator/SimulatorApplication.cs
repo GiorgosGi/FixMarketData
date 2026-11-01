@@ -12,7 +12,9 @@ public sealed class SimulatorApplication : IApplication, IDisposable
     {
         ["AAPL"] = 195.25m,
         ["MSFT"] = 421.10m,
-        ["EURUSD"] = 1.0850m
+        ["EURUSD"] = 1.0850m,
+        ["TSLA"] = 399.81m,
+        ["NVDA"] = 204.10m
     };
 
     private readonly Random _random = new();
